@@ -1,0 +1,21 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ---- 本工具运行时生成的缓存 / 输出 ----
+.sleeveliner_cache.json
+.sleeveliner_cover_cache/
+output/
+
+# ---- 测试与示例产物 ----
+test*/
+*.lrc
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
