@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/cover_named.jpg" width="320" alt="SleeveLiner cover">
+  <img src="assets/social_preview.png" width="100%" alt="SleeveLiner">
 </p>
 
 <h1 align="center">SleeveLiner</h1>
