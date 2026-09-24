@@ -53,6 +53,8 @@ jobs:
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
+        env:
+          PYTHONIOENCODING: utf-8
         run: dist\sleeve_liner.exe --help
 
       - name: Smoke test (macOS)

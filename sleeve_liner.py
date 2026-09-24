@@ -68,7 +68,16 @@ try:
 except ImportError:
     _HAS_ZHCONV = False
 
-VERSION = "2.3"
+VERSION = "2.3.1"
+
+# Windows 控制台（cp1252/GBK 等）打印中文与 ✓✗ 等符号时避免 UnicodeEncodeError：
+# 编码不了的字符替换为 "?" 而不是崩溃
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="replace")
+    except Exception:  # noqa: BLE001  非常规环境下静默降级
+        pass
 
 # ---------------------------------------------------------------------------
 # 常量 / HTTP（SSL 精细化：仅音乐平台域名关闭证书校验）
