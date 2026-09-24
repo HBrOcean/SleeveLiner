@@ -159,6 +159,11 @@ Add `--lrc-encoding gbk` — many car stereos / old players only accept GBK.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
+## 🚀 Publishing
+
+How to publish this project to GitHub with Git (including automated builds / releases):
+see **[PUBLISH.md](PUBLISH.md)** (Chinese).
+
 ## 📜 License
 
 [MIT](LICENSE) © 2026 Oceaniat

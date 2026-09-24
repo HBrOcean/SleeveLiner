@@ -157,6 +157,10 @@ D:/Music/                      ← 你的原始文件，不动
 
 见 [CHANGELOG.md](CHANGELOG.md)。
 
+## 🚀 发布指南
+
+如何用 Git 把项目发布到 GitHub（含自动构建 / 发版步骤），见 **[PUBLISH.md](PUBLISH.md)**。
+
 ## 📜 License
 
 [MIT](LICENSE) © 2026 Oceaniat

@@ -1,0 +1,116 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 用 PyInstaller 打包成「单文件可执行程序」，上传为 artifacts
+  build-binary:
+    name: Build binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: sleeve_liner-linux
+            binary: sleeve_liner
+          - os: windows-latest
+            artifact: sleeve_liner-windows
+            binary: sleeve_liner.exe
+          - os: macos-latest
+            artifact: sleeve_liner-macos
+            binary: sleeve_liner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install zhconv pyinstaller
+
+      - name: Build executable with PyInstaller
+        run: pyinstaller --onefile --name sleeve_liner --collect-all mutagen --collect-all zhconv sleeve_liner.py
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: ./dist/sleeve_liner --help
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: dist\sleeve_liner.exe --help
+
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: ./dist/sleeve_liner --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error
+
+  # 打包一份源码压缩包，方便直接下载整套项目
+  build-source:
+    name: Package source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: |
+          mkdir -p dist
+          zip -r dist/SleeveLiner-source.zip . -x ".git/*" -x "dist/*" -x "__pycache__/*"
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SleeveLiner-source
+          path: dist/SleeveLiner-source.zip
+          if-no-files-found: error
+
+  # 打 v* tag 时：自动创建 Release，附上各平台可执行文件与源码包
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-binary, build-source]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Rename assets (unique names)
+        run: |
+          mkdir -p out
+          cp artifacts/sleeve_liner-linux/sleeve_liner        out/sleeve_liner-linux
+          cp artifacts/sleeve_liner-windows/sleeve_liner.exe  out/sleeve_liner-windows.exe
+          cp artifacts/sleeve_liner-macos/sleeve_liner        out/sleeve_liner-macos
+          cp artifacts/SleeveLiner-source/SleeveLiner-source.zip out/
+          ls -la out
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true

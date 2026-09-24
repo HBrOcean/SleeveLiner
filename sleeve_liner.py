@@ -90,9 +90,12 @@ MUSIC_HOSTS = ("kugou.com", "music.163.com", "163.com", "126.net")
 
 # 网易云请求头（带 Referer 更规范，提升接口稳定性）
 _NETEASE_HEADERS = {"Referer": "https://music.163.com/"}
+# 程序所在目录（兼容 PyInstaller 打包后的可执行文件）
+_BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable))
+             if getattr(sys, "frozen", False)
+             else os.path.dirname(os.path.abspath(__file__)))
 # 封面本地缓存目录（避免同一首歌重复下载）
-_COVER_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                ".sleeveliner_cover_cache")
+_COVER_CACHE_DIR = os.path.join(_BASE_DIR, ".sleeveliner_cover_cache")
 
 _CTX_UNVERIFIED = ssl.create_default_context()
 _CTX_UNVERIFIED.check_hostname = False
@@ -144,12 +147,13 @@ def norm(s):
 
 
 def to_simplified(s):
-    """繁体 → 简体（zhconv 不可用时用内置小表兜底）"""
-    if not s:
-        return ""
-    if _HAS_ZHCONV:
+    """繁体 → 简体（zhconv 不可用时返回原串）"""
+    if not s or not _HAS_ZHCONV:
+        return s
+    try:
         return zhconv.convert(s, "zh-cn")
-    return s
+    except Exception:  # noqa: BLE001  打包环境可能缺 zhconv 数据文件
+        return s
 
 
 def norm_key(s):
@@ -488,8 +492,7 @@ class Kuwo:
 
 _CACHE = {}
 _CACHE_LOCK = threading.Lock()
-_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           ".sleeveliner_cache.json")
+_CACHE_PATH = os.path.join(_BASE_DIR, ".sleeveliner_cache.json")
 _CACHE_TTL = 7 * 24 * 3600
 
 
