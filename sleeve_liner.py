@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_ZHCONV = False
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 
 # Windows 控制台（cp1252/GBK 等）打印中文与 ✓✗ 等符号时避免 UnicodeEncodeError：
 # 编码不了的字符替换为 "?" 而不是崩溃
@@ -496,6 +496,64 @@ class Kuwo:
 
 
 # ---------------------------------------------------------------------------
+# LRCLIB（开源歌词库，社区维护；提供带时间轴的同步歌词，作高精度歌词源）
+# 文档 https://lrclib.net/docs —— 请求须带可识别的 User-Agent
+# ---------------------------------------------------------------------------
+
+class Lrclib:
+    SEARCH = "https://lrclib.net/api/search?q={kw}"
+    GET = ("https://lrclib.net/api/get?artist_name={ar}"
+           "&track_name={ti}&album_name={al}&duration={dur}")
+
+    @staticmethod
+    def _headers():
+        return {"User-Agent": f"SleeveLiner/{VERSION} "
+                              "(+https://github.com/HBrOcean/SleeveLiner)"}
+
+    @staticmethod
+    def _to_cand(s):
+        """LRCLIB 条目 -> 候选，仅取带时间轴的同步歌词"""
+        lrc = (s.get("syncedLyrics") or "").strip()
+        if not lrc:
+            return None
+        try:
+            dur_ms = int(round(float(s.get("duration") or 0) * 1000))
+        except Exception:  # noqa: BLE001
+            dur_ms = 0
+        return {"id": s.get("id"), "artist": s.get("artistName", "") or "",
+                "title": s.get("trackName", "") or "",
+                "duration_ms": dur_ms, "lrc": lrc}
+
+    @staticmethod
+    def search_lyric(artist, title):
+        kw = urllib.parse.quote(f"{artist} {title}".strip())
+        data = retry(lambda: http_get_json(Lrclib.SEARCH.format(kw=kw),
+                                           headers=Lrclib._headers()))
+        out = []
+        for s in data or []:
+            c = Lrclib._to_cand(s)
+            if c:
+                out.append(c)
+        return out
+
+    @staticmethod
+    def get_exact(artist, title, dur_ms):
+        """按 歌手+歌名+时长 精确取同步歌词（对防错配最有效）"""
+        if not artist or not title or not dur_ms:
+            return None
+        try:
+            data = retry(lambda: http_get_json(
+                Lrclib.GET.format(ar=urllib.parse.quote(artist),
+                                  ti=urllib.parse.quote(title),
+                                  al="", dur=round(dur_ms / 1000)),
+                headers=Lrclib._headers()))
+        except Exception:  # noqa: BLE001
+            return None
+        lrc = (data.get("syncedLyrics") or "").strip()
+        return lrc or None
+
+
+# ---------------------------------------------------------------------------
 # 本地缓存（进程内 dict + 线程锁 + JSON 落盘）
 # ---------------------------------------------------------------------------
 
@@ -689,6 +747,31 @@ def clean_lrc(text):
         return text
     lines = [ln for ln in text.splitlines() if not _LRC_PRIVATE.match(ln)]
     return "\n".join(lines).strip()
+
+
+_LRC_HEAD_TAG = re.compile(r"^\s*\[(ti|ar|al):", re.I)
+
+
+def normalize_lrc_header(text, artist="", title="", album=""):
+    """把歌词头部 [ti:][ar:][al:] 还原为已确认的元信息。
+
+    音源侧的歌词条目常带错误/垃圾信息（如酷狗合辑把歌手写成「日韩群星」、
+    专辑字段是「269444」这类数字），统一用程序已核对过的歌手/歌名/专辑覆盖，
+    避免播放器显示错误信息；其余标签与时间轴保持不变。
+    """
+    if not text:
+        return text
+    keep = [ln for ln in text.splitlines() if not _LRC_HEAD_TAG.match(ln)]
+    while keep and not keep[0].strip():
+        keep.pop(0)
+    header = []
+    if title:
+        header.append(f"[ti:{title}]")
+    if artist:
+        header.append(f"[ar:{artist}]")
+    if album:
+        header.append(f"[al:{album}]")
+    return "\n".join(header + keep).strip()
 
 
 def detect_lang(text):
@@ -1049,6 +1132,7 @@ def _do_enrich(src, out, ext, artist, title, dur_ms, tol_ms, want_cover,
         if want_lyric:
             lrc = _fallback_lyric(orders, dur_ms, tol_ms, args)
             if lrc:
+                lrc = normalize_lrc_header(lrc, artist, title)
                 return _write(src, out, ext, None, None, lrc, args, lines, "宽松匹配")
         lines.append("⚠ 搜索匹配失败: " + reason)
         return "\n".join(lines)
@@ -1075,13 +1159,16 @@ def _do_enrich(src, out, ext, artist, title, dur_ms, tol_ms, want_cover,
                      if cover else "⚠ 封面下载失败（跳过）")
     lyric = (_fetch_lyric(hit, artist, title, dur_ms, tol_ms, args.cache)
              if want_lyric else None)
-    if want_lyric and not lyric:
+    if lyric:
+        lyric = normalize_lrc_header(lyric, hit.artist or artist,
+                                     hit.title or title, hit.album)
+    elif want_lyric:
         lines.append("⚠ 歌词搜索失败（跳过）")
     return _write(src, out, ext, hit, cover, lyric, args, lines, "")
 
 
 def _fetch_lyric(hit, artist, title, dur_ms, tol_ms, use_cache=True):
-    """歌词：酷狗优先 → 网易云 → 酷我，均带歌名/时长校验"""
+    """歌词：酷狗优先 → 网易云 → LRCLIB（精确/搜索）→ 酷我，均带歌名/时长校验"""
     ha, ht = hit.artist or artist, hit.title or title
     try:
         for c in Kugou.search_lyric(ha, ht, dur_ms):
@@ -1094,11 +1181,25 @@ def _fetch_lyric(hit, artist, title, dur_ms, tol_ms, use_cache=True):
         pass
     try:
         nhits = search_song("netease", ha, ht, use_cache)
-        nbest, _ = pick_best(nhits, ha, ht, dur_ms, tol_ms, strict_singer=False)
+        nbest, _ = pick_best(nhits, ha, ht, dur_ms, tol_ms, strict_singer=True)
         if nbest and nbest.extra.get("id"):
             lrc = Netease.download_lyric(nbest.extra["id"])
             if lrc:
                 return clean_lrc(lrc)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        lrc = Lrclib.get_exact(ha, ht, dur_ms)
+        if lrc:
+            return clean_lrc(lrc)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        for c in Lrclib.search_lyric(ha, ht):
+            if names_ok(c["title"], ht) and \
+                    abs(c["duration_ms"] - dur_ms) <= max(tol_ms, 2000):
+                if c["lrc"]:
+                    return clean_lrc(c["lrc"])
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -1114,7 +1215,7 @@ def _fetch_lyric(hit, artist, title, dur_ms, tol_ms, use_cache=True):
 
 
 def _fallback_lyric(orders, dur_ms, tol_ms, args):
-    """宽松兜底歌词：只要歌名 + 时长；酷狗 / 网易云 / 酷我 三源"""
+    """宽松兜底歌词：只要歌名 + 时长；酷狗 / 网易云 / LRCLIB / 酷我 四源"""
     for ar, ti in orders:
         try:
             for c in Kugou.search_lyric(ar, ti, dur_ms):
@@ -1132,6 +1233,17 @@ def _fallback_lyric(orders, dur_ms, tol_ms, args):
                 lrc = Netease.download_lyric(nbest.extra["id"])
                 if lrc:
                     return clean_lrc(lrc)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            lrc = Lrclib.get_exact(ar, ti, dur_ms)
+            if lrc:
+                return clean_lrc(lrc)
+            for c in Lrclib.search_lyric(ar, ti):
+                if names_ok(c["title"], ti) and \
+                        abs(c["duration_ms"] - dur_ms) <= max(tol_ms, 2000):
+                    if c["lrc"]:
+                        return clean_lrc(c["lrc"])
         except Exception:  # noqa: BLE001
             pass
         try:

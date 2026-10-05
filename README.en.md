@@ -33,9 +33,9 @@ everything to an `output/` folder while **leaving your original files untouched*
 | | |
 |---|---|
 | 🎵 **Multi-format** | MP3 / FLAC / M4A / OPUS / OGG |
-| 🌐 **Multi-source** | Kugou (real covers + lyrics) + NetEase Cloud (HD covers, year/track) + Kuwo (lyrics fallback) |
+| 🌐 **Multi-source** | Kugou (real covers + lyrics) + NetEase Cloud (HD covers, year/track) + LRCLIB (synced lyrics) + Kuwo (lyrics fallback) |
 | 🖼️ **Cover art** | Picks the clearest image (Kugou 400/800, NetEase 800×800) and embeds it |
-| 📝 **Lyrics** | Matched online → embedded + saved as `.lrc` (UTF-8 or GBK) |
+| 📝 **Lyrics** | Four sources (Kugou / NetEase / [LRCLIB](https://lrclib.net) / Kuwo) → embedded + saved as `.lrc` (UTF-8 or GBK) |
 | 🏷️ **Metadata** | Fills missing title / artist / album / year / track number |
 | 🛡️ **Anti-mismatch** | Triple check on title + artist + duration; Simplified/Traditional & artist aliases normalized |
 | 🔁 **Relaxed retry** | On a strict-match miss, re-searches by title only with title/duration as hard constraints |
@@ -130,7 +130,7 @@ title + duration as hard constraints with artist as a bonus (hits are marked "re
         NetEase search ── cross-check ──> pick a track (strict → relaxed retry)
                                                               │
         cover: Kugou union_cover / NetEase ──> embed
-        lyrics: Kugou / NetEase / Kuwo ──> clean ──> embed + .lrc
+        lyrics: Kugou / NetEase / LRCLIB / Kuwo ──> clean + normalize header ──> embed + .lrc
 ```
 
 - Tag fields: MP3 uses ID3v2.4 (`APIC`/`USLT`/`TDRC`/`TRCK`…);
@@ -138,6 +138,21 @@ title + duration as hard constraints with artist as a bonus (hits are marked "re
   M4A uses `covr`/`©lyr`/`©day`/`trkn`
 - Lyric language tag is auto-detected (Chinese / Japanese / Korean → `chi` / `jpn` / `kor`)
 - Kugou's private tag lines (`[id:]`, `[hash:]`, …) are stripped for cleaner playback
+- The `[ti:]` `[ar:]` `[al:]` header is overwritten with the verified artist / title / album,
+  fixing dirty data on the source side (e.g. a Kugou compilation crediting the artist as "日韩群星")
+
+## 🩺 Source health check
+
+Music-platform APIs change from time to time (we've seen Kugou's placeholder-cover issue and
+Kuwo rate limiting in the past). A built-in script lets you verify all sources at any time:
+
+```bash
+python tools/health_check.py                 # built-in sample songs (CN / EN / JP)
+python tools/health_check.py "Artist" "Title"   # custom songs, multiple allowed
+```
+
+It reports **search / cover / lyrics** status per source plus a summary; exit code `0` = core sources
+healthy, `1` = something is wrong.
 
 ## ❓ FAQ
 
