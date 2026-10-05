@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_ZHCONV = False
 
-VERSION = "2.3.2"
+VERSION = "2.4.0"
 
 # Windows 控制台（cp1252/GBK 等）打印中文与 ✓✗ 等符号时避免 UnicodeEncodeError：
 # 编码不了的字符替换为 "?" 而不是崩溃

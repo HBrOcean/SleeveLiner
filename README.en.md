@@ -48,9 +48,20 @@ everything to an `output/` folder while **leaving your original files untouched*
 ```bash
 pip install mutagen          # required
 pip install zhconv           # optional but recommended: Simplified/Traditional matching
+pip install PySide6-Essentials  # optional: GUI (gui.py)
 ```
 
 ## 🚀 Quick start
+
+**GUI (recommended):**
+
+```bash
+python gui.py
+```
+
+Drag & drop files or folders → click **Start**. Progress animation, colored live log, stop anytime, one-click open of the output folder.
+
+**CLI:**
 
 ```bash
 # Single file

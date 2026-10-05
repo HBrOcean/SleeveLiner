@@ -48,14 +48,24 @@
 ```bash
 pip install mutagen          # 必需
 pip install zhconv           # 可选但强烈建议：简体/繁体匹配
+pip install PySide6-Essentials  # 可选：图形界面（gui.py）
 ```
 
 ## 🚀 快速开始
 
+**图形界面（推荐）：**
+
+```bash
+python gui.py
+```
+
+拖入文件或文件夹 → 点「开始处理」即可。支持进度动画、实时彩色日志、随时停止、一键打开输出文件夹。
+
+**命令行：**
+
 ```bash
 # 处理单个文件
 python sleeve_liner.py 周杰伦-晴天.mp3
-
 # 处理整个文件夹（递归子目录）
 python sleeve_liner.py "D:/Music/" -r
 

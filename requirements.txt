@@ -2,3 +2,6 @@ mutagen>=1.46.0
 
 # 可选：简体/繁体匹配（强烈建议安装，缺失时降级为内置小表）
 # zhconv>=1.4.5
+
+# 可选：图形界面 gui.py（CLI 无需安装）
+# PySide6-Essentials>=6.5
