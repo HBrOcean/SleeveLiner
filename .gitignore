@@ -12,8 +12,10 @@ env/
 output/
 
 # ---- 测试与示例产物 ----
-test*/
+test_output*/
+test_*/
 *.lrc
+!tests/
 
 # ---- 系统 ----
 .DS_Store

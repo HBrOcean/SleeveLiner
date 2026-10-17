@@ -1212,7 +1212,10 @@ def _do_enrich(src, out, ext, artist, title, dur_ms, tol_ms, want_cover,
             lrc = _fallback_lyric(orders, dur_ms, tol_ms, args)
             if lrc:
                 lrc = normalize_lrc_header(lrc, artist, title)
-                return _write(src, out, ext, None, None, lrc, args, lines, "宽松匹配")
+                # 歌名已通过「歌名+时长」校验，把文件名解析出的标题/歌手一并写入，
+                # 避免宽松匹配的副本只有歌词、没有元数据
+                lite = Hit("宽松匹配", artist, title, dur_ms)
+                return _write(src, out, ext, lite, None, lrc, args, lines, "宽松匹配")
         lines.append("⚠ 搜索匹配失败: " + reason)
         return "\n".join(lines)
 

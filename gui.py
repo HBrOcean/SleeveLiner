@@ -256,7 +256,10 @@ class Worker(QObject):
                 self.sig_progress.emit(done, total, src)
                 self._emit_result(src, res)
                 if self._cancel.is_set():
-                    ex.shutdown(wait=False, cancel_futures=True)
+                    try:                    # cancel_futures 需要 Python 3.9+
+                        ex.shutdown(wait=False, cancel_futures=True)
+                    except TypeError:       # Python 3.8 回退
+                        ex.shutdown(wait=False)
                     self.sig_log.emit(
                         f'<span style="color:{ERR}">■ 已由用户取消，'
                         f'未处理项已放弃（缓存已保存）</span>')

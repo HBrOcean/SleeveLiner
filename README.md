@@ -192,6 +192,17 @@ python tools/health_check.py "歌手" "歌名"    # 自定义歌曲，可多组
 **Q：歌词在车载上乱码？**
 加 `--lrc-encoding gbk`，多数车载/老播放器只认 GBK。
 
+## 🧪 测试
+
+纯函数单元测试（不联网，约 0.03 秒）：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+CI 会在 **Python 3.8 + 3.12 双版本**运行测试与 pyflakes 静态检查，**不通过就不会打包**——
+每次发版都有回归保障。
+
 ## 📄 更新日志
 
 见 [CHANGELOG.md](CHANGELOG.md)。

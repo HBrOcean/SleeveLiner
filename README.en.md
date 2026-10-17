@@ -195,6 +195,16 @@ No. Everything is written to `output/`; originals stay byte-for-byte identical.
 **Lyrics are garbled on my car stereo?**
 Add `--lrc-encoding gbk` — many car stereos / old players only accept GBK.
 
+## 🧪 Tests
+
+Pure-function unit tests (no network, ~0.03 s):
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+CI runs the tests + pyflakes on **Python 3.8 and 3.12**, and nothing gets packaged unless they pass.
+
 ## 📄 Changelog
 
 See [CHANGELOG.md](CHANGELOG.md).

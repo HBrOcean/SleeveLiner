@@ -12,9 +12,59 @@ permissions:
   contents: read
 
 jobs:
+  # 单元测试：核心纯函数不联网，3.8 与 3.12 双版本验证兼容性
+  test:
+    name: Unit tests (Py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  # 静态检查（需要 PySide6 才能覆盖 gui.py 的导入）
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyflakes PySide6-Essentials
+
+      - name: pyflakes
+        run: python -m pyflakes sleeve_liner.py gui.py tools/health_check.py
+
+      - name: Syntax check
+        run: python -m py_compile sleeve_liner.py gui.py tools/health_check.py
+
   # 用 PyInstaller 打包成「单文件可执行程序」，上传为 artifacts
   build-binary:
     name: Build binary (${{ matrix.os }})
+    needs: [test, lint]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -71,6 +121,7 @@ jobs:
   # 打包 GUI（PySide6）为「单文件图形程序」，体积较大，与 CLI 分开产出
   build-gui:
     name: Build GUI (${{ matrix.os }})
+    needs: [test, lint]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
