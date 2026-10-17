@@ -25,12 +25,14 @@ sys.path.insert(0, _BASE)
 import sleeve_liner as core                # noqa: E402  核心引擎
 
 try:
-    from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl
+    from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl, QSettings
     from PySide6.QtGui import (QColor, QFont, QGuiApplication, QPainter, QPen,
-                               QBrush, QPixmap, QDesktopServices)
-    from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox,
+                               QBrush, QPixmap, QDesktopServices, QKeySequence,
+                               QShortcut, QPalette)
+    from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog,
                                    QHBoxLayout, QFrame, QLabel, QLineEdit,
-                                   QMainWindow, QPushButton, QScrollArea,
+                                   QListWidget, QListWidgetItem, QMainWindow,
+                                   QPushButton,
                                    QSpinBox, QTextEdit, QVBoxLayout, QWidget,
                                    QFileDialog, QSizePolicy, QGridLayout)
 except ImportError:
@@ -292,11 +294,14 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.thread = None
         self._blink = 0
+        self.settings = QSettings("SleeveLiner", "GUI")
         self.setWindowTitle("SleeveLiner — 封面与歌词自动补齐")
-        self.setMinimumSize(760, 640)
-        self.resize(760, 680)
+        self.setMinimumSize(760, 660)
+        self.resize(760, 700)
         self.setAcceptDrops(True)
         self._build_ui()
+        self._load_settings()
+        self._bind_shortcuts()
 
     # ---------------- UI 构建 ----------------
     def _build_ui(self):
@@ -399,6 +404,33 @@ class MainWindow(QMainWindow):
         orow.addWidget(self.cb_encoding)
         col.addWidget(optcard)
 
+        # 高级（默认折叠）：手动指定歌手/歌名、查看待处理列表
+        advrow = QHBoxLayout()
+        advrow.setSpacing(8)
+        self.btn_adv = QPushButton("高级选项 ▾")
+        self.btn_adv.setCheckable(True)
+        self.btn_adv.clicked.connect(self._toggle_adv)
+        self.btn_list = QPushButton("查看待处理文件")
+        self.btn_list.clicked.connect(self._show_list)
+        advrow.addWidget(self.btn_adv)
+        advrow.addWidget(self.btn_list)
+        advrow.addStretch(1)
+        col.addLayout(advrow)
+
+        self.adv = QFrame(objectName="optCard")
+        arow = QHBoxLayout(self.adv)
+        arow.setContentsMargins(16, 10, 16, 10)
+        arow.setSpacing(10)
+        arow.addWidget(QLabel("手动指定"))
+        self.ed_artist = QLineEdit()
+        self.ed_artist.setPlaceholderText("歌手（留空自动识别）")
+        self.ed_title = QLineEdit()
+        self.ed_title.setPlaceholderText("歌名（留空自动识别）")
+        arow.addWidget(self.ed_artist, 1)
+        arow.addWidget(self.ed_title, 1)
+        self.adv.setVisible(False)
+        col.addWidget(self.adv)
+
         # 开始 / 停止
         self.btn_go = QPushButton("开始处理", objectName="go")
         self.btn_go.clicked.connect(self._start)
@@ -430,6 +462,9 @@ class MainWindow(QMainWindow):
         # 日志
         self.log = QTextEdit(objectName="log")
         self.log.setReadOnly(True)
+        pal = self.log.palette()
+        pal.setColor(QPalette.PlaceholderText, QColor("#8A8A8A"))
+        self.log.setPalette(pal)
         self.log.setPlaceholderText("处理日志会显示在这里…")
         col.addWidget(self.log, 2)
 
@@ -515,6 +550,73 @@ class MainWindow(QMainWindow):
             bits.append("（其中没有可处理的音频文件）")
         self.dcount.setText(" · ".join(bits) if bits else "尚未选择任何内容")
         self.btn_go.setEnabled(bool(self.items) and not self._running())
+        self.btn_list.setEnabled(bool(self.items))
+        self.btn_list.setToolTip("" if self.items else "暂无待处理文件")
+
+    # ---------------- 高级 / 设置 ----------------
+    def _toggle_adv(self, checked):
+        self.adv.setVisible(bool(checked))
+        self.btn_adv.setText("高级选项 ▴" if checked else "高级选项 ▾")
+
+    def _show_list(self):
+        if not self.items:
+            self._log("还没有选择任何音频文件", WARN)
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"待处理文件（{len(self.items)} 个）")
+        dlg.resize(640, 440)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(10)
+        lst = QListWidget()
+        for src, _out in self.items[:2000]:
+            item = QListWidgetItem(os.path.basename(src))
+            item.setToolTip(src)
+            lst.addItem(item)
+        lay.addWidget(lst)
+        if len(self.items) > 2000:
+            lay.addWidget(QLabel(f"（仅显示前 2000 项，共 {len(self.items)} 项）"))
+        btn = QPushButton("关闭")
+        btn.clicked.connect(dlg.accept)
+        lay.addWidget(btn, 0, Qt.AlignRight)
+        dlg.exec()
+
+    def _load_settings(self):
+        s = self.settings
+        try:
+            self.sp_jobs.setValue(int(s.value("jobs", 4)))
+            idx = self.cb_encoding.findText(str(s.value("encoding", "UTF-8")))
+            if idx >= 0:
+                self.cb_encoding.setCurrentIndex(idx)
+            self.cb_recursive.setChecked(str(s.value("recursive", "true")) == "true")
+            self.cb_rename.setChecked(str(s.value("rename", "false")) == "true")
+            self.cb_force.setChecked(str(s.value("force", "false")) == "true")
+            geo = s.value("geometry")
+            if geo:
+                self.restoreGeometry(geo)
+        except Exception:      # noqa: BLE001
+            pass
+
+    def _save_settings(self):
+        s = self.settings
+        s.setValue("jobs", self.sp_jobs.value())
+        s.setValue("encoding", self.cb_encoding.currentText())
+        s.setValue("recursive", self.cb_recursive.isChecked())
+        s.setValue("rename", self.cb_rename.isChecked())
+        s.setValue("force", self.cb_force.isChecked())
+        s.setValue("geometry", self.saveGeometry())
+
+    def closeEvent(self, e):
+        self._save_settings()
+        super().closeEvent(e)
+
+    def _bind_shortcuts(self):
+        QShortcut(QKeySequence("Ctrl+O"), self,
+                  activated=lambda: self._browse(True))
+        QShortcut(QKeySequence("Ctrl+Shift+O"), self,
+                  activated=lambda: self._browse(False))
+        QShortcut(QKeySequence("F5"), self, activated=self._start)
+        QShortcut(QKeySequence("Esc"), self, activated=self._stop)
 
     # ---------------- 开始 / 停止 ----------------
     def _running(self):
@@ -523,7 +625,9 @@ class MainWindow(QMainWindow):
     def _make_args(self):
         return argparse.Namespace(
             paths=self.paths, recursive=self.cb_recursive.isChecked(),
-            artist="", title="", tol=5.0, jobs=self.sp_jobs.value(),
+            artist=self.ed_artist.text().strip(),
+            title=self.ed_title.text().strip(),
+            tol=5.0, jobs=self.sp_jobs.value(),
             rename=self.cb_rename.isChecked(), outdir="output",
             lrc_encoding=self.cb_encoding.currentText().lower(),
             no_cache=False, no_cover=False, no_lyric=False, no_meta=False,
@@ -568,8 +672,9 @@ class MainWindow(QMainWindow):
 
     # ---------------- 回调 ----------------
     def _on_progress(self, done, total, src):
-        self.bar.set_value(int(done * 100 / max(total, 1)), animated=True)
-        self.lab_count.setText(f"{done} / {total}")
+        pct = int(done * 100 / max(total, 1))
+        self.bar.set_value(pct, animated=True)
+        self.lab_count.setText(f"{done} / {total} · {pct}%")
         name = os.path.basename(src)
         self.lab_file.setText(name if len(name) <= 46 else name[:44] + "…")
 
@@ -587,6 +692,8 @@ class MainWindow(QMainWindow):
         color = OK if stats["fail"] == 0 else (ERR if stats["ok"] == 0 else WARN)
         self._log(f"完成：成功 {stats['ok']} / 跳过 {stats['skip']} "
                   f"/ 失败 {stats['fail']}", color, big=True)
+        for note in core.consume_notices():
+            self._log(note, WARN)
 
     def _tick_blink(self):
         self._blink = (self._blink + 1) % 2

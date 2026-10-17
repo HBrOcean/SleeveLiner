@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_ZHCONV = False
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 # Windows 控制台（cp1252/GBK 等）打印中文与 ✓✗ 等符号时避免 UnicodeEncodeError：
 # 编码不了的字符替换为 "?" 而不是崩溃
@@ -141,6 +141,51 @@ def retry(fn, times=2):
         except Exception as e:  # noqa: BLE001
             last = e
     raise last
+
+
+# ---------------------------------------------------------------------------
+# 音源熔断：平台风控 / 限流时自动跳过该源，避免批量处理时反复撞墙
+# ---------------------------------------------------------------------------
+
+_SRC_BLOCK = {}          # 源名 -> 解除时间戳
+_SRC_BLOCK_LOCK = threading.Lock()
+_SRC_NOTICE = set()      # 已提示过的源（每源只提示一次）
+SRC_BLOCK_SECS = {"netease": 600, "kuwo": 180}
+
+
+def source_blocked(name):
+    with _SRC_BLOCK_LOCK:
+        until = _SRC_BLOCK.get(name, 0)
+    return time.time() < until
+
+
+def source_block(name):
+    """熔断某源一段时间（默认见 SRC_BLOCK_SECS）"""
+    with _SRC_BLOCK_LOCK:
+        _SRC_BLOCK[name] = time.time() + SRC_BLOCK_SECS.get(name, 300)
+
+
+def take_notice(name):
+    """每个源只返回一次「已跳过」提示，避免刷屏"""
+    with _SRC_BLOCK_LOCK:
+        if name in _SRC_NOTICE:
+            return False
+        _SRC_NOTICE.add(name)
+        return True
+
+
+def consume_notices():
+    """取出本次运行中被熔断的源提示（供 CLI / GUI 汇总用）"""
+    out = []
+    for name, label in (("netease", "网易云"), ("kuwo", "酷我")):
+        if source_blocked(name) and take_notice(name):
+            out.append(f"ℹ {label}接口触发风控/限流，本次运行已自动跳过")
+    return out
+
+
+def _is_risk_response(data):
+    """网易云风控响应：code=-462 / -460（要求人机验证）"""
+    return isinstance(data, dict) and data.get("code") in (-462, -460)
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +341,11 @@ def pick_best(hits, artist, title, dur_ms, tol_ms, strict_singer=True):
 
 def _clean_stem(stem):
     stem = stem.strip()
+    # 去掉开头的站点/音质标签与音轨号前缀，如 "[FLAC] "、"01. "、"01 - "、"01_"
+    # 仅处理带标点分隔的前缀，避免误伤 "7 Rings" 这类以数字开头的歌名
+    for _ in range(2):
+        stem = re.sub(r"^\s*\[[^\]]{1,15}\]\s*", "", stem).strip()
+        stem = re.sub(r"^\s*\d{1,3}\s*[.\-_)]\s*", "", stem).strip()
     # 去掉常见的站点/音质后缀
     stem = re.sub(r"[-_\s]*(\[.*?\]|【.*?】|\(.*?\)|（.*?）)$", "", stem).strip()
     stem = re.sub(r"[-_\s]*(HQ|无损|320K|FLAC|高音质)$", "", stem, flags=re.I).strip()
@@ -304,12 +354,25 @@ def _clean_stem(stem):
 
 def parse_from_filename(path):
     """从文件名拆 (artist, title)，拆不出返回 None"""
-    stem = _clean_stem(os.path.splitext(os.path.basename(path))[0])
+    raw = os.path.splitext(os.path.basename(path))[0].strip()
+    stem = _clean_stem(raw)
     for sep in (" - ", " – ", " — ", "-", "–", "—", "_"):
         if sep in stem:
             parts = [p.strip() for p in stem.split(sep)]
             if len(parts) == 2 and parts[0] and parts[1]:
+                # 再清一次歌手侧的音轨号（如 "01 周杰伦" -> "周杰伦"）
+                artist = re.sub(r"^\s*\d{1,3}\s+(?=\D)", "", parts[0]).strip()
+                if artist:
+                    parts[0] = artist
                 return parts[0], parts[1]
+    # "歌名（歌手）" 形式：括号内不是版本/音质等噪声词时，当作歌手
+    m = re.match(r"^(.+?)\s*[（(]\s*([^）)]{1,20}?)\s*[）)]$", raw)
+    if m:
+        inner = m.group(2).strip()
+        if inner and not re.search(
+                r"live|伴奏|remix|混音|cover|翻唱|版|hq|无损|flac|320|高清|完整",
+                inner, re.I):
+            return inner, _clean_stem(m.group(1))
     return None
 
 
@@ -393,9 +456,14 @@ class Netease:
 
     @staticmethod
     def search_song(artist, title):
+        if source_blocked("netease"):
+            return []
         kw = urllib.parse.quote(f"{artist} {title}".strip())
         data = retry(lambda: http_get_json(Netease.SEARCH.format(kw=kw),
                                            headers=_NETEASE_HEADERS))
+        if _is_risk_response(data):
+            source_block("netease")
+            return []
         hits = []
         for s in (data.get("result") or {}).get("songs", []) or []:
             ar = "/".join(a.get("name", "") for a in s.get("artists", []) or [])
@@ -408,10 +476,13 @@ class Netease:
     @staticmethod
     def detail(sid):
         """取歌曲详情 -> (year, track, cover_url)"""
-        if not sid:
+        if not sid or source_blocked("netease"):
             return "", "", ""
         data = retry(lambda: http_get_json(Netease.DETAIL.format(sid=sid),
                                            headers=_NETEASE_HEADERS))
+        if _is_risk_response(data):
+            source_block("netease")
+            return "", "", ""
         songs = data.get("songs") or []
         if not songs:
             return "", "", ""
@@ -435,10 +506,13 @@ class Netease:
 
     @staticmethod
     def download_lyric(sid):
-        if not sid:
+        if not sid or source_blocked("netease"):
             return None
         data = retry(lambda: http_get_json(Netease.LYRIC.format(sid=sid),
                                            headers=_NETEASE_HEADERS))
+        if _is_risk_response(data):
+            source_block("netease")
+            return None
         lrc = ((data.get("lrc") or {}).get("lyric") or "").strip()
         return lrc or None
 
@@ -455,6 +529,8 @@ class Kuwo:
     @staticmethod
     def search_lyric(artist, title):
         """返回 [{id, artist, title, duration_ms}]（酷我结果较杂，需上层严格校验）"""
+        if source_blocked("kuwo"):
+            return []
         kw = urllib.parse.quote(f"{artist} {title}")
         raw, _ = retry(lambda: http_get(Kuwo.SEARCH.format(kw=kw)))
         text = raw.decode("utf-8", "replace")
@@ -475,11 +551,14 @@ class Kuwo:
 
     @staticmethod
     def download_lyric(rid):
-        if not rid:
+        if not rid or source_blocked("kuwo"):
             return None
         data = retry(lambda: http_get_json(
             Kuwo.LYRIC.format(mid=rid),
             headers={"Referer": "https://m.kuwo.cn/"}))
+        if data.get("status") in (301, 302, 403) or data.get("code") in (301, 302, 403):
+            source_block("kuwo")          # 连续请求被限流
+            return None
         lrclist = (data.get("data") or {}).get("lrclist") or []
         if not lrclist:
             return None
@@ -1296,9 +1375,8 @@ def _write(src, out, ext, hit, cover, lyric, args, lines, note):
         return "\n".join(lines) + f"\n✗ 复制到输出失败: {e}"
 
     # 2) 对输出副本写入封面/歌词/元数据
-    changed = False
     try:
-        changed = write_tags(out, hit, cover, lyric, do_cover, do_lyric)
+        write_tags(out, hit, cover, lyric, do_cover, do_lyric)
     except Exception as e:  # noqa: BLE001
         return "\n".join(lines) + f"\n✗ 写入失败: {e}"
 
@@ -1329,7 +1407,13 @@ def _write(src, out, ext, hit, cover, lyric, args, lines, note):
             except Exception as e:  # noqa: BLE001
                 lines.append(f"⚠ 重命名失败: {e}")
 
-    lines.append(f"✓ 已输出到 {os.path.relpath(final_out)}")
+    try:
+        shown = os.path.relpath(final_out, os.path.dirname(os.path.abspath(src)))
+        if shown.startswith(".."):
+            shown = final_out
+    except Exception:  # noqa: BLE001
+        shown = final_out
+    lines.append(f"✓ 已输出到 {shown}")
     if note:
         lines.append(f"({note})")
     return "\n".join(l for l in lines if l)
@@ -1376,6 +1460,8 @@ def main():
         description=f"联网补齐音频封面与歌词 v{VERSION}"
                     "（酷狗主源 + 网易云/酷我副源）")
     ap.add_argument("paths", nargs="+", help="一个或多个文件/目录")
+    ap.add_argument("-V", "--version", action="version",
+                    version=f"SleeveLiner {VERSION}")
     ap.add_argument("-r", "--recursive", action="store_true", help="递归处理目录")
     ap.add_argument("--artist", default="", help="手动指定歌手")
     ap.add_argument("--title", default="", help="手动指定歌名")
@@ -1452,6 +1538,8 @@ def main():
 
     print(f"\n==== 完成: 成功 {stats['ok']} / 跳过 {stats['skip']} "
           f"/ 失败 {stats['fail']} ====")
+    for note in consume_notices():
+        print(note)
     if bad:
         print("未成功项：")
         for mark, s in bad:

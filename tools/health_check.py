@@ -33,6 +33,7 @@ DEFAULT_CASES = [
 ]
 
 OK, BAD = "[ OK ]", "[FAIL]"
+WARN_MARK = "[WARN]"
 
 
 def _line(tag, name, detail):
@@ -81,6 +82,9 @@ def check_kugou(artist, title, dur_s):
 def check_netease(artist, title):
     """网易云：搜索 + detail（封面）+ 歌词"""
     res = {"搜索": False, "封面": False, "歌词": False}
+    if sl.source_blocked("netease"):
+        _line(WARN_MARK, "网易云", "触发风控/人机验证，本次运行已自动跳过")
+        return res
     try:
         hits = sl.Netease.search_song(artist, title)
         if hits:
@@ -136,6 +140,9 @@ def check_lrclib(artist, title, dur_s):
 def check_kuwo(artist, title):
     """酷我：搜索 + 歌词（该源易限流，连续请求或返回 301）"""
     res = {"搜索": False, "歌词": False}
+    if sl.source_blocked("kuwo"):
+        _line(WARN_MARK, "酷我", "触发限流，本次运行已自动跳过")
+        return res
     try:
         cands = sl.Kuwo.search_lyric(artist, title)
         if cands:
@@ -185,15 +192,25 @@ def main():
     print("\n" + "=" * 68)
     print(f"汇总（{total} 首样例，'核心可用' = 搜索且有歌词）")
     print("=" * 68)
-    for label, key in [("酷狗", "kugou"), ("网易云", "netease"),
-                       ("LRCLIB", "lrclib"), ("酷我", "kuwo")]:
+    for label, key, sname in [("酷狗", "kugou", None), ("网易云", "netease", "netease"),
+                              ("LRCLIB", "lrclib", None), ("酷我", "kuwo", "kuwo")]:
         n = summary[key]
-        mark = "✅" if n == total else ("⚠️" if n > 0 else "❌")
-        print(f"  {mark} {label:<8s} 核心可用 {n}/{total}")
+        if sname and sl.source_blocked(sname):
+            mark, extra = "⚠️", "  ← 被风控/限流拦截，本次已熔断"
+        elif n == total:
+            mark, extra = "✅", ""
+        elif n > 0:
+            mark, extra = "⚠️", ""
+        else:
+            mark, extra = "❌", ""
+        print(f"  {mark} {label:<8s} 核心可用 {n}/{total}{extra}")
 
-    core_ok = (summary["kugou"] or summary["netease"]) == total
+    core_ok = summary["kugou"] == total or summary["netease"] == total
     print("\n结论：" + ("核心源（酷狗/网易云）工作正常 ✅"
                       if core_ok else "核心源存在异常，请检查上表 ❌"))
+    if sl.source_blocked("netease"):
+        print("提示：网易云触发了 IP 风控（要求人机验证），家用网络通常正常；"
+              "程序已自动跳过该源。")
     print("提示：酷我易限流，偶发 301 属正常；多源互补可保证整体可用性。")
     sys.exit(0 if core_ok else 1)
 

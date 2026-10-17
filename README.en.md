@@ -61,6 +61,11 @@ python gui.py
 
 Drag & drop files or folders → click **Start**. Progress animation, colored live log, stop anytime, one-click open of the output folder.
 
+- **Advanced options** (collapsed by default): specify artist / title manually for badly-named files
+- **View pending files** before starting
+- **Remembers your settings**: threads, encoding, options, window geometry
+- **Shortcuts**: `Ctrl+O` files · `Ctrl+Shift+O` folder · `F5` start · `Esc` stop
+
 **CLI:**
 
 ```bash
@@ -166,6 +171,15 @@ It reports **search / cover / lyrics** status per source plus a summary; exit co
 healthy, `1` = something is wrong.
 
 ## ❓ FAQ
+
+**Does it understand filenames like `01 - 周杰伦 - 晴天.mp3`?**
+Yes. Track-number prefixes and `[FLAC]`-style tags are stripped automatically, and `Title(Artist).mp3`
+is supported. For truly messy names, use `--artist` / `--title` (CLI) or the GUI's **Advanced options**.
+
+**It says "NetEase blocked (risk control)" — what now?**
+That's NetEase's anti-bot protection for high-frequency access from a single IP; home networks rarely hit it.
+The tool **trips a breaker on that source** and falls back to Kugou / LRCLIB / Kuwo, so covers and lyrics
+are unaffected (only some year/track metadata may be missing).
 
 **Nothing found — what now?**
 Obscure tracks or ones missing from the sources simply won't match. The tool says so and
